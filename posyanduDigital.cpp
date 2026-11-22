@@ -1,199 +1,151 @@
-#include <algorithm>
-#include <cctype>
-#include <cstdlib>
-#include <ctime>
-#include <iostream>
-#include <sstream>
-#include <string>
-#include <vector>
-
+#include <algorithm>  
+#include <fstream>    
+#include <iostream>   
+#include <sstream>   
+#include <string>     
+#include <vector>    
 using namespace std;
 
-// ---------- STRUCT & DATA ----------
-
-struct Bayi {
-    string nik, nama, tglLahir, ibu, ayah;
-};
-
-struct Ukur {
-    string nik, tanggal;
-    double berat, tinggi;
-};
-
-const string FILE_DATA = "data_posyandu.csv";
-
-vector<Bayi> daftarBayi;
-vector<Ukur> daftarUkur;
-
-// Penyimpanan sesi penimbangan
-vector<Ukur> sesiUkur;
-bool sesiBelumDiexport = false;
+// ---------- PENYIMPANAN FILE (satu file CSV) ----------
+// Format data_posyandu.csv: satu baris = satu pengukuran, data bayi diulang
+// di tiap barisnya. Bayi yang belum pernah ditimbang punya satu baris dengan
+// kolom pengukuran kosong. Pemisah kolom ';' dan desimal ',' (format Excel
+// Indonesia), jadi bisa langsung di-double-click. NIK ditulis ="..." supaya
+// Excel tidak mengubahnya jadi 1,23E+15.
+// Kolom: nik;nama;tgl_lahir;nama_ibu;nama_ayah;tgl_ukur;berat_kg;tinggi_cm
 
 
-// ---------- FUNGSI BANTU ----------
-
-string trim(const string& s) {
-    size_t a = s.find_first_not_of(" \t\r\n");
-    if (a == string::npos) return "";
-
-    size_t b = s.find_last_not_of(" \t\r\n");
-    return s.substr(a, b - a + 1);
+// Fungsi agar teks yang dimasukan berformat Kutip
+string kutip(const string& s) {
+    string hasil = "\"";
+    for (char c : s) {
+        if (c == '"') hasil += "\"\"";
+        else hasil += c;
+    }
+    return hasil + "\"";
 }
 
-string huruf_kecil(string s) {
-    transform(s.begin(), s.end(), s.begin(),
-              [](unsigned char c) {
-                  return static_cast<char>(tolower(c));
-              });
+// Fungsi mengubah titik jadi koma agar excel bisa membaca
+string angkaCsv(double v) {
+    ostringstream os;
+    os << v;
+    string s = os.str();
+    replace(s.begin(), s.end(), '.', ',');
     return s;
 }
 
-vector<string> pecah(const string& s, char pemisah) {
-    vector<string> hasil;
-    string bagian;
-    stringstream ss(s);
-
-    while (getline(ss, bagian, pemisah))
-        hasil.push_back(bagian);
-
-    return hasil;
-}
-
-string hariIni() {
-    time_t t = time(nullptr);
-    tm* lt = localtime(&t);
-
-    char buf[11];
-    strftime(buf, sizeof(buf), "%Y-%m-%d", lt);
-
-    return buf;
-}
-
-string stempelFile() {
-    time_t t = time(nullptr);
-    tm* lt = localtime(&t);
-
-    char buf[16];
-    strftime(buf, sizeof(buf), "%Y-%m-%d_%H%M", lt);
-
-    return buf;
-}
-
-bool nikValid(const string& s) {
-    return s.size() == 16 &&
-           all_of(s.begin(), s.end(),
-                  [](unsigned char c) {
-                      return isdigit(c);
-                  });
-}
-
-bool tanggalValid(const string& s) {
-    if (s.size() != 10 || s[4] != '-' || s[7] != '-')
-        return false;
-
-    for (int i : {0, 1, 2, 3, 5, 6, 8, 9})
-        if (!isdigit(static_cast<unsigned char>(s[i])))
-            return false;
-
-    int th = stoi(s.substr(0, 4));
-    int bl = stoi(s.substr(5, 2));
-    int tg = stoi(s.substr(8, 2));
-
-    if (bl < 1 || bl > 12 || tg < 1)
-        return false;
-
-    int hari[] = {
-        31, 28, 31, 30, 31, 30,
-        31, 31, 30, 31, 30, 31
-    };
-
-    bool kabisat =
-        (th % 4 == 0 && th % 100 != 0) || th % 400 == 0;
-
-    int maks = hari[bl - 1] +
-               ((bl == 2 && kabisat) ? 1 : 0);
-
-    return tg <= maks;
-}
-
-int cariIndexNik(const string& nik) {
-    for (size_t i = 0; i < daftarBayi.size(); i++) {
-        if (daftarBayi[i].nik == nik)
-            return static_cast<int>(i);
-    }
-
-    return -1;
-}
-
-
-// ---------- INPUT DENGAN VALIDASI ----------
-
-string bacaBaris(const string& label) {
-    cout << label << ": ";
-
-    string s;
-
-    if (!getline(cin, s)) {
-        cout << "\nInput selesai.\n";
-        exit(0);
-    }
-
-    return trim(s);
-}
-
-string inputTeks(const string& label) {
-    while (true) {
-        string s = bacaBaris(label);
-
-        if (!s.empty())
-            return s;
-
-        cout << "  ! Tidak boleh kosong.\n";
-    }
-}
-
-string inputNik() {
-    while (true) {
-        string s = bacaBaris("NIK (16 digit)");
-
-        if (nikValid(s))
-            return s;
-
-        cout << "  ! NIK harus 16 digit angka.\n";
-    }
-}
-
-string inputTanggalLahir() {
-    while (true) {
-        string s = bacaBaris("Tanggal lahir (YYYY-MM-DD)");
-
-        if (!tanggalValid(s))
-            cout << "  ! Format/tanggal tidak valid, contoh: 2025-03-14\n";
-
-        else if (s > hariIni())
-            cout << "  ! Tanggal lahir tidak boleh di masa depan.\n";
-
-        else
-            return s;
-    }
-}
-
-double inputAngka(const string& label) {
-    while (true) {
-        string s = bacaBaris(label);
-
-        replace(s.begin(), s.end(), ',', '.');
-
-        try {
-            size_t pos = 0;
-            double v = stod(s, &pos);
-
-            if (pos == s.size() && v > 0)
-                return v;
-
-        } catch (...) {
+// Pecah satu baris CSV menjadi kolom (mengerti tanda kutip).
+vector<string> pecahCsv(const string& baris, char pemisah) {
+    vector<string> kolom;
+    string sel;
+    bool dalamKutip = false;
+    for (size_t i = 0; i < baris.size(); i++) {
+        char c = baris[i];
+        if (dalamKutip) {
+            if (c == '"' && i + 1 < baris.size() && baris[i + 1] == '"') {
+                sel += '"';
+                i++;
+            } else if (c == '"') {
+                dalamKutip = false;
+            } else {
+                sel += c;
+            }
+        } else if (c == '"') {
+            dalamKutip = true;
+        } else if (c == pemisah) {
+            kolom.push_back(sel);
+            sel.clear();
+        } else {
+            sel += c;
         }
-
-        cout << "  ! Masukkan angka lebih dari 0.\n";
     }
+    kolom.push_back(sel);
+    return kolom;
+}
+
+// Menulis CSV ke namaFile dari dataUkur. Bayi yang tidak punya penimbangan di
+// dataUkur hanya ikut ditulis kalau sertakanTanpaUkur = true (arsip lengkap).
+// Mengembalikan false kalau gagal menulis (misalnya file sedang dibuka di Excel).
+bool tulisCsv(const string& namaFile, const vector<Ukur>& dataUkur,
+              bool sertakanTanpaUkur) {
+    ofstream f(namaFile, ios::binary | ios::trunc);
+    f << "\xEF\xBB\xBF" << "sep=;\r\n";  // BOM UTF-8 + petunjuk pemisah untuk Excel
+    f << "nik;nama;tgl_lahir;nama_ibu;nama_ayah;tgl_ukur;berat_kg;tinggi_cm\r\n";
+    for (const auto& b : daftarBayi) {
+        string depan = "=\"" + b.nik + "\";" + kutip(b.nama) + ";" + b.tglLahir +
+                       ";" + kutip(b.ibu) + ";" + kutip(b.ayah);
+        vector<Ukur> milik;
+        for (const auto& u : dataUkur)
+            if (u.nik == b.nik) milik.push_back(u);
+        sort(milik.begin(), milik.end(),
+             [](const Ukur& x, const Ukur& y) { return x.tanggal < y.tanggal; });
+        if (milik.empty() && sertakanTanpaUkur) f << depan << ";;;\r\n";
+        for (const auto& u : milik)
+            f << depan << ";" << u.tanggal << ";" << angkaCsv(u.berat) << ";"
+              << angkaCsv(u.tinggi) << "\r\n";
+    }
+    f.close();
+    return !f.fail();
+}
+
+// Simpan arsip lengkap (semua bayi + seluruh riwayat penimbangan).
+bool simpanData() { return tulisCsv(FILE_DATA, daftarUkur, true); }
+
+void simpanDanLapor(const string& pesanSukses) {
+    if (simpanData())
+        cout << pesanSukses << "\n";
+    else
+        cout << "GAGAL menyimpan ke " << FILE_DATA
+             << ". Kalau file sedang dibuka di Excel, tutup dulu lalu ulangi.\n"
+             << "(Perubahan tadi belum tersimpan permanen.)\n";
+}
+
+// Membaca data_posyandu.csv. Mengembalikan false kalau file belum ada.
+bool bacaFileData() {
+    ifstream f(FILE_DATA, ios::binary);
+    if (!f) return false;
+    string baris;
+    char pemisah = ';';
+    bool header = true;
+    while (getline(f, baris)) {
+        if (baris.size() >= 3 && (unsigned char)baris[0] == 0xEF &&
+            (unsigned char)baris[1] == 0xBB && (unsigned char)baris[2] == 0xBF)
+            baris.erase(0, 3);  // buang BOM
+        baris = trim(baris);
+        if (baris.empty() || baris.rfind("sep=", 0) == 0) continue;
+        if (header) {  // baris judul kolom; dari sini pemisahnya ditentukan
+            header = false;
+            pemisah = (baris.find(';') != string::npos) ? ';' : ',';
+            continue;
+        }
+        auto k = pecahCsv(baris, pemisah);
+        if (k.size() < 5) continue;
+        string nik = trim(k[0]);
+        if (!nik.empty() && nik[0] == '=') nik.erase(0, 1);  // buang tanda =
+        if (!nikValid(nik)) continue;
+        if (cariIndexNik(nik) == -1)
+            daftarBayi.push_back({nik, trim(k[1]), trim(k[2]), trim(k[3]), trim(k[4])});
+        if (k.size() >= 8 && !trim(k[5]).empty()) {
+            string b = trim(k[6]), t = trim(k[7]);
+            replace(b.begin(), b.end(), ',', '.');
+            replace(t.begin(), t.end(), ',', '.');
+            try {
+                daftarUkur.push_back({nik, trim(k[5]), stod(b), stod(t)});
+            } catch (...) {
+            }
+        }
+    }
+    return true;
+}
+
+void muatData() {
+    bacaFileData();
+}
+
+
+// Catat satu penimbangan ke KEDUA penyimpanan: arsip permanen dan sesi.
+void catatTimbang(const Ukur& u) {
+    daftarUkur.push_back(u);
+    sesiUkur.push_back(u);
+    sesiBelumDiexport = true;
 }
