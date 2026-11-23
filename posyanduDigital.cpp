@@ -149,3 +149,192 @@ void catatTimbang(const Ukur& u) {
     sesiUkur.push_back(u);
     sesiBelumDiexport = true;
 }
+
+
+// ---------- FITUR ----------
+void tambahBayi() {
+    cout << "\n--- Tambah Data Bayi ---\n";
+    string nik = inputNik();
+    if (cariIndexNik(nik) != -1) {
+        cout << "NIK sudah terdaftar.\n";
+        return;
+    }
+    Bayi b;
+    b.nik = nik;
+    b.nama = inputTeks("Nama bayi");
+    b.tglLahir = inputTanggalLahir();
+    b.ibu = inputTeks("Nama ibu");
+    b.ayah = inputTeks("Nama ayah");
+    cout << "Penimbangan hari ini (" << hariIni() << ") untuk " << b.nama << ":\n";
+    Ukur u;
+    u.nik = nik;
+    u.tanggal = hariIni();
+    u.berat = inputAngka("Berat (kg)");
+    u.tinggi = inputAngka("Tinggi (cm)");
+    daftarBayi.push_back(b);
+    catatTimbang(u);
+    simpanDanLapor("Data bayi dan pengukuran tersimpan.");
+}
+
+void catatPengukuran() {
+    cout << "\n--- Catat Pengukuran ---\n";
+    string nik = inputNik();
+    int idx = cariIndexNik(nik);
+    if (idx == -1) {
+        cout << "NIK belum terdaftar. Tambah data bayi dulu.\n";
+        return;
+    }
+    cout << "Bayi: " << daftarBayi[idx].nama << "\n";
+    Ukur u;
+    u.nik = nik;
+    u.tanggal = hariIni();
+    u.berat = inputAngka("Berat (kg)");
+    u.tinggi = inputAngka("Tinggi (cm)");
+    catatTimbang(u);
+    simpanDanLapor("Pengukuran tersimpan.");
+}
+
+void cariBayi() {
+    cout << "\n--- Cari Bayi ---\n";
+    string kata = huruf_kecil(bacaBaris("Ketik nama atau NIK"));
+    int ditemukan = 0;
+    for (const auto& b : daftarBayi) {
+        if (huruf_kecil(b.nama).find(kata) != string::npos ||
+            b.nik.find(kata) != string::npos) {
+            cout << b.nik << " | " << b.nama << " | lahir " << b.tglLahir
+                 << " | ibu: " << b.ibu << " | ayah: " << b.ayah << "\n";
+            ditemukan++;
+        }
+    }
+    if (ditemukan == 0) cout << "Tidak ditemukan.\n";
+}
+
+void riwayat() {
+    cout << "\n--- Riwayat Pengukuran ---\n";
+    string nik = inputNik();
+    int idx = cariIndexNik(nik);
+    if (idx == -1) {
+        cout << "NIK belum terdaftar.\n";
+        return;
+    }
+    vector<Ukur> hasil;
+    for (const auto& u : daftarUkur)
+        if (u.nik == nik) hasil.push_back(u);
+    if (hasil.empty()) {
+        cout << "Belum ada data pengukuran untuk " << daftarBayi[idx].nama << ".\n";
+        return;
+    }
+    sort(hasil.begin(), hasil.end(),
+         [](const Ukur& a, const Ukur& b) { return a.tanggal < b.tanggal; });
+    cout << "Bayi: " << daftarBayi[idx].nama << " | sudah ditimbang "
+         << hasil.size() << " kali\n";
+    cout << left << setw(5) << "Ke-" << setw(12) << "Tanggal" << right << setw(12)
+         << "Berat (kg)" << setw(14) << "Tinggi (cm)" << "\n";
+    cout << fixed << setprecision(1);
+    int no = 1;
+    for (const auto& u : hasil)
+        cout << left << setw(5) << no++ << setw(12) << u.tanggal << right << setw(12)
+             << u.berat << setw(14) << u.tinggi << "\n";
+}
+
+void laporan() {
+    cout << "\n--- Laporan Ringkas ---\n";
+    cout << "Jumlah bayi terdaftar  : " << daftarBayi.size() << "\n";
+    cout << "Jumlah data pengukuran : " << daftarUkur.size() << "\n";
+    if (daftarUkur.empty()) {
+        cout << "Rata-rata berat badan  : -\n";
+        return;
+    }
+    double total = 0;
+    for (const auto& u : daftarUkur) total += u.berat;
+    cout << fixed << setprecision(1);
+    cout << "Rata-rata berat badan  : " << total / daftarUkur.size() << " kg\n";
+}
+
+void hapusBayi() {
+    cout << "\n--- Hapus Data Bayi ---\n";
+    string nik = inputNik();
+    int idx = cariIndexNik(nik);
+    if (idx == -1) {
+        cout << "NIK tidak ditemukan.\n";
+        return;
+    }
+    string yakin = bacaBaris("Hapus " + daftarBayi[idx].nama +
+                             " beserta seluruh riwayatnya? (y/n)");
+    if (huruf_kecil(yakin) != "y") {
+        cout << "Dibatalkan.\n";
+        return;
+    }
+    daftarBayi.erase(daftarBayi.begin() + idx);
+    daftarUkur.erase(remove_if(daftarUkur.begin(), daftarUkur.end(),
+                               [&](const Ukur& u) { return u.nik == nik; }),
+                     daftarUkur.end());
+    sesiUkur.erase(remove_if(sesiUkur.begin(), sesiUkur.end(),
+                             [&](const Ukur& u) { return u.nik == nik; }),
+                   sesiUkur.end());
+    if (sesiUkur.empty()) sesiBelumDiexport = false;
+    simpanDanLapor("Data dihapus.");
+}
+
+// Membuat laporan dari penyimpanan SESI: hanya penimbangan yang dicatat sejak
+// program dibuka. Arsip permanen (data_posyandu.csv) tidak diubah sama sekali.
+void exportLaporan() {
+    cout << "\n--- Export Laporan Sesi Ini ---\n";
+    if (sesiUkur.empty()) {
+        cout << "Belum ada penimbangan di sesi ini. Catat dulu lewat menu 1 atau 2.\n";
+        return;
+    }
+    cout << "Penimbangan di sesi ini (" << sesiUkur.size() << " data):\n";
+    cout << fixed << setprecision(1);
+    for (const auto& u : sesiUkur) {
+        int idx = cariIndexNik(u.nik);
+        string namaBayi = (idx == -1) ? u.nik : daftarBayi[idx].nama;
+        cout << "  " << left << setw(20) << namaBayi << right << setw(7) << u.berat
+             << " kg" << setw(8) << u.tinggi << " cm\n";
+    }
+    string nama = "laporan_" + stempelFile() + ".csv";
+    if (tulisCsv(nama, sesiUkur, false)) {
+        sesiBelumDiexport = false;
+        cout << "Laporan diekspor ke " << nama << ". Bisa dibuka di Excel.\n";
+    } else {
+        cout << "GAGAL menulis " << nama
+             << ". Kalau file sedang dibuka di Excel, tutup dulu lalu ulangi.\n";
+    }
+}
+
+// ---------- MENU UTAMA ----------
+int main() {
+    muatData();
+    while (true) {
+        cout << "\n=== POSYANDU DIGITAL ===\n"
+             << "1. Tambah data bayi (sekaligus catat berat & tinggi)\n"
+             << "2. Catat pengukuran bulanan\n"
+             << "3. Cari bayi\n"
+             << "4. Lihat riwayat pengukuran\n"
+             << "5. Laporan ringkas\n"
+             << "6. Export laporan sesi ini (untuk puskesmas)\n"
+             << "7. Hapus data bayi\n"
+             << "0. Keluar\n";
+        string pilihan = bacaBaris("Pilih menu");
+        if (pilihan == "0") {
+            if (sesiBelumDiexport) {
+                string yakin = bacaBaris(
+                    "Ada " + to_string(sesiUkur.size()) +
+                    " penimbangan sesi ini yang belum diexport jadi laporan. "
+                    "Tetap keluar? (y/n)");
+                if (huruf_kecil(yakin) != "y") continue;
+            }
+            cout << "Sampai jumpa.\n";
+            break;
+        } 
+        else if (pilihan == "1") tambahBayi();
+        else if (pilihan == "2") catatPengukuran();
+        else if (pilihan == "3") cariBayi();
+        else if (pilihan == "4") riwayat();
+        else if (pilihan == "5") laporan();
+        else if (pilihan == "6") exportLaporan();
+        else if (pilihan == "7") hapusBayi();
+        else cout << "Pilihan tidak valid.\n";
+    }
+    return 0;
+}
