@@ -27,10 +27,9 @@ const string FILE_DATA = "data_posyandu.csv";
 vector<Bayi> daftarBayi;
 vector<Ukur> daftarUkur;  // PENYIMPANAN PERMANEN: semua riwayat timbang (di file)
 
-// PENYIMPANAN SESI: hanya di memori, hilang saat program ditutup.
-// Berisi penimbangan yang dicatat pada sesi ini; dipakai untuk membuat laporan.
-vector<Ukur> sesiUkur;
-bool sesiBelumDiexport = false;
+// true kalau ada perubahan di memori yang gagal disimpan ke file.
+// Selama true, muatUlang() tidak boleh menimpa memori dengan isi file.
+bool belumTersimpan = false;
 
 // ---------- FUNGSI BANTU ----------
 string trim(const string& s) {
@@ -46,28 +45,11 @@ string huruf_kecil(string s) {
     return s;
 }
 
-vector<string> pecah(const string& s, char pemisah) {
-    vector<string> hasil;
-    string bagian;
-    stringstream ss(s);
-    while (getline(ss, bagian, pemisah)) hasil.push_back(bagian);
-    return hasil;
-}
-
 string hariIni() {
     time_t t = time(nullptr);
     tm* lt = localtime(&t);
     char buf[11];
     strftime(buf, sizeof(buf), "%Y-%m-%d", lt);
-    return buf;
-}
-
-// Contoh: 2026-11-22_1550 (dipakai untuk nama file laporan)
-string stempelFile() {
-    time_t t = time(nullptr);
-    tm* lt = localtime(&t);
-    char buf[16];
-    strftime(buf, sizeof(buf), "%Y-%m-%d_%H%M", lt);
     return buf;
 }
 
@@ -212,6 +194,7 @@ vector<string> pecahCsv(const string& baris, char pemisah) {
 bool tulisCsv(const string& namaFile, const vector<Ukur>& dataUkur,
               bool sertakanTanpaUkur) {
     ofstream f(namaFile, ios::binary | ios::trunc);
+    if (!f) return false;
     f << "\xEF\xBB\xBF" << "sep=;\r\n";  // BOM UTF-8 + petunjuk pemisah untuk Excel
     f << "nik;nama;tgl_lahir;nama_ibu;nama_ayah;tgl_ukur;berat_kg;tinggi_cm\r\n";
     for (const auto& b : daftarBayi) {
@@ -231,22 +214,26 @@ bool tulisCsv(const string& namaFile, const vector<Ukur>& dataUkur,
     return !f.fail();
 }
 
-// Simpan arsip lengkap (semua bayi + seluruh riwayat penimbangan).
-bool simpanData() { return tulisCsv(FILE_DATA, daftarUkur, true); }
-
 void simpanDanLapor(const string& pesanSukses) {
-    if (simpanData())
-        cout << pesanSukses << "\n";
-    else
+    while (!tulisCsv(FILE_DATA, daftarUkur, true)) {
         cout << "GAGAL menyimpan ke " << FILE_DATA
-             << ". Kalau file sedang dibuka di Excel, tutup dulu lalu ulangi.\n"
-             << "(Perubahan tadi belum tersimpan permanen.)\n";
+             << ". Kalau file sedang dibuka di Excel, tutup dulu.\n";
+        string ulang = bacaBaris("Coba simpan lagi? (y/n)");
+        if (huruf_kecil(ulang) != "y") {
+            belumTersimpan = true;
+            cout << "(Perubahan baru ada di memori, belum tersimpan permanen.)\n";
+            return;
+        }
+    }
+    belumTersimpan = false;
+    cout << pesanSukses << "\n";
 }
 
 // Membaca data_posyandu.csv. Mengembalikan false kalau file belum ada.
-bool bacaFileData() {
+void bacaFileData() {
+    int barisDilewati = 0;
     ifstream f(FILE_DATA, ios::binary);
-    if (!f) return false;
+    if (!f) return;
     string baris;
     char pemisah = ';';
     bool header = true;
@@ -265,7 +252,7 @@ bool bacaFileData() {
         if (k.size() < 5) continue;
         string nik = trim(k[0]);
         if (!nik.empty() && nik[0] == '=') nik.erase(0, 1);  // buang tanda =
-        if (!nikValid(nik)) continue;
+        if (!nikValid(nik)) { barisDilewati++; continue; };
         if (cariIndexNik(nik) == -1)
             daftarBayi.push_back({nik, trim(k[1]), trim(k[2]), trim(k[3]), trim(k[4])});
         if (k.size() >= 8 && !trim(k[5]).empty()) {
@@ -274,28 +261,29 @@ bool bacaFileData() {
             replace(t.begin(), t.end(), ',', '.');
             try {
                 daftarUkur.push_back({nik, trim(k[5]), stod(b), stod(t)});
-            } catch (...) {
+            } catch (...) { 
+                barisDilewati++; 
             }
         }
     }
-    return true;
+    if (barisDilewati > 0)
+    cout << "PERINGATAN: " << barisDilewati << " baris di " << FILE_DATA
+         << " tidak terbaca dan akan HILANG saat menyimpan!\n"
+         << "Cek file (pakai Notepad) sebelum melanjutkan.\n";
 }
 
-void muatData() {
+// Baca ulang file supaya edit manual di CSV ikut terbaca.
+// Dilewati kalau ada perubahan di memori yang belum berhasil disimpan.
+void muatUlang() {
+    if (belumTersimpan) return;
+    daftarBayi.clear();
+    daftarUkur.clear();
     bacaFileData();
 }
 
-
-// Catat satu penimbangan ke KEDUA penyimpanan: arsip permanen dan sesi.
-void catatTimbang(const Ukur& u) {
-    daftarUkur.push_back(u);
-    sesiUkur.push_back(u);
-    sesiBelumDiexport = true;
-}
-
-
 // ---------- FITUR ----------
 void tambahBayi() {
+    muatUlang();
     cout << "\n--- Tambah Data Bayi ---\n";
     string nik = inputNik();
     if (cariIndexNik(nik) != -1) {
@@ -320,6 +308,7 @@ void tambahBayi() {
 }
 
 void catatPengukuran() {
+    muatUlang();
     cout << "\n--- Catat Pengukuran ---\n";
     string nik = inputNik();
     int idx = cariIndexNik(nik);
@@ -338,6 +327,7 @@ void catatPengukuran() {
 }
 
 void cariBayi() {
+    muatUlang();
     cout << "\n--- Cari Bayi ---\n";
     string kata = huruf_kecil(bacaBaris("Ketik nama atau NIK"));
     int ditemukan = 0;
@@ -353,6 +343,7 @@ void cariBayi() {
 }
 
 void riwayat() {
+    muatUlang();
     cout << "\n--- Riwayat Pengukuran ---\n";
     string nik = inputNik();
     int idx = cariIndexNik(nik);
@@ -381,6 +372,7 @@ void riwayat() {
 }
 
 void laporan() {
+    muatUlang();
     cout << "\n--- Laporan Ringkas ---\n";
     cout << "Jumlah bayi terdaftar  : " << daftarBayi.size() << "\n";
     cout << "Jumlah data pengukuran : " << daftarUkur.size() << "\n";
@@ -395,6 +387,7 @@ void laporan() {
 }
 
 void hapusBayi() {
+    muatUlang();
     cout << "\n--- Hapus Data Bayi ---\n";
     string nik = inputNik();
     int idx = cariIndexNik(nik);
@@ -412,10 +405,6 @@ void hapusBayi() {
     daftarUkur.erase(remove_if(daftarUkur.begin(), daftarUkur.end(),
                                [&](const Ukur& u) { return u.nik == nik; }),
                      daftarUkur.end());
-    sesiUkur.erase(remove_if(sesiUkur.begin(), sesiUkur.end(),
-                             [&](const Ukur& u) { return u.nik == nik; }),
-                   sesiUkur.end());
-    if (sesiUkur.empty()) sesiBelumDiexport = false;
     simpanDanLapor("Data dihapus.");
 }
 
@@ -446,9 +435,36 @@ void exportLaporanBulan() {
         cout << "  ! Tahun harus 4 digit, contoh: 2026\n";
     }
     string awalan = tahun + "-" + (bulan < 10 ? "0" : "") + to_string(bulan);
+    
+    vector<Ukur> terpilih;
+    for (const auto& u : daftarUkur)
+        if (u.tanggal.rfind(awalan, 0) == 0) terpilih.push_back(u);
+    if (terpilih.empty()) {
+        cout << "Tidak ada penimbangan pada " << awalan << ".\n";
+        return;
+    }
+    sort(terpilih.begin(), terpilih.end(),
+         [](const Ukur& x, const Ukur& y) { return x.tanggal < y.tanggal; });
+
+    cout << "Penimbangan pada " << awalan << " (" << terpilih.size() << " data):\n";
+    cout << fixed << setprecision(1);
+    for (const auto& u : terpilih) {
+        int idx = cariIndexNik(u.nik);
+        string namaBayi = (idx == -1) ? u.nik : daftarBayi[idx].nama;
+        cout << "  " << u.tanggal << "  " << left << setw(20) << namaBayi
+             << right << setw(7) << u.berat << " kg" << setw(8) << u.tinggi
+             << " cm\n";
+    }
+    string nama = "laporan_" + awalan + ".csv";
+    if (tulisCsv(nama, terpilih, false))
+        cout << "Laporan diekspor ke " << nama << ". Bisa dibuka di Excel.\n";
+    else
+        cout << "GAGAL menulis " << nama
+             << ". Kalau file sedang dibuka di Excel, tutup dulu lalu ulangi.\n";
+}
 // ---------- MENU UTAMA ----------
 int main() {
-    muatData();
+    bacaFileData();
     while (true) {
         cout << "\n=== POSYANDU DIGITAL ===\n"
              << "1. Tambah data bayi (sekaligus catat berat & tinggi)\n"
@@ -461,13 +477,6 @@ int main() {
              << "0. Keluar\n";
         string pilihan = bacaBaris("Pilih menu");
         if (pilihan == "0") {
-            if (sesiBelumDiexport) {
-                string yakin = bacaBaris(
-                    "Ada " + to_string(sesiUkur.size()) +
-                    " penimbangan sesi ini yang belum diexport jadi laporan. "
-                    "Tetap keluar? (y/n)");
-                if (huruf_kecil(yakin) != "y") continue;
-            }
             cout << "Sampai jumpa.\n";
             break;
         } 
