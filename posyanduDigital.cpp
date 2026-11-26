@@ -419,32 +419,33 @@ void hapusBayi() {
     simpanDanLapor("Data dihapus.");
 }
 
-// Membuat laporan dari penyimpanan SESI: hanya penimbangan yang dicatat sejak
-// program dibuka. Arsip permanen (data_posyandu.csv) tidak diubah sama sekali.
-void exportLaporan() {
-    cout << "\n--- Export Laporan Sesi Ini ---\n";
-    if (sesiUkur.empty()) {
-        cout << "Belum ada penimbangan di sesi ini. Catat dulu lewat menu 1 atau 2.\n";
-        return;
+// Membuat laporan dari penyimpanan, bisa untuk bulan berapa saja
+void exportLaporanBulan() {
+    muatUlang();
+    cout << "\n--- Export Laporan per Bulan ---\n";
+    int bulan = 0;
+    while (true) {
+        string sb = bacaBaris("Bulan (1-12)");
+        try {
+            size_t pos = 0;
+            int v = stoi(sb, &pos);
+            if (pos == sb.size() && v >= 1 && v <= 12) { bulan = v; break; }
+        } catch (...) {
+        }
+        cout << "  ! Masukkan angka 1 sampai 12.\n";
     }
-    cout << "Penimbangan di sesi ini (" << sesiUkur.size() << " data):\n";
-    cout << fixed << setprecision(1);
-    for (const auto& u : sesiUkur) {
-        int idx = cariIndexNik(u.nik);
-        string namaBayi = (idx == -1) ? u.nik : daftarBayi[idx].nama;
-        cout << "  " << left << setw(20) << namaBayi << right << setw(7) << u.berat
-             << " kg" << setw(8) << u.tinggi << " cm\n";
+    string tahun = hariIni().substr(0, 4);
+    while (true) {
+        string st = bacaBaris("Tahun (kosongkan = " + tahun + ")");
+        if (st.empty()) break;
+        if (st.size() == 4 && all_of(st.begin(), st.end(),
+                                     [](unsigned char c) { return isdigit(c); })) {
+            tahun = st;
+            break;
+        }
+        cout << "  ! Tahun harus 4 digit, contoh: 2026\n";
     }
-    string nama = "laporan_" + stempelFile() + ".csv";
-    if (tulisCsv(nama, sesiUkur, false)) {
-        sesiBelumDiexport = false;
-        cout << "Laporan diekspor ke " << nama << ". Bisa dibuka di Excel.\n";
-    } else {
-        cout << "GAGAL menulis " << nama
-             << ". Kalau file sedang dibuka di Excel, tutup dulu lalu ulangi.\n";
-    }
-}
-
+    string awalan = tahun + "-" + (bulan < 10 ? "0" : "") + to_string(bulan);
 // ---------- MENU UTAMA ----------
 int main() {
     muatData();
@@ -455,7 +456,7 @@ int main() {
              << "3. Cari bayi\n"
              << "4. Lihat riwayat pengukuran\n"
              << "5. Laporan ringkas\n"
-             << "6. Export laporan sesi ini (untuk puskesmas)\n"
+             << "6. Export laporan per bulan (untuk puskesmas)\n"
              << "7. Hapus data bayi\n"
              << "0. Keluar\n";
         string pilihan = bacaBaris("Pilih menu");
@@ -475,7 +476,7 @@ int main() {
         else if (pilihan == "3") cariBayi();
         else if (pilihan == "4") riwayat();
         else if (pilihan == "5") laporan();
-        else if (pilihan == "6") exportLaporan();
+        else if (pilihan == "6") exportLaporanBulan();
         else if (pilihan == "7") hapusBayi();
         else cout << "Pilihan tidak valid.\n";
     }
